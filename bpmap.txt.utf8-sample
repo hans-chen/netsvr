@@ -1,0 +1,7 @@
+﻿// Leave first line alone, to cope with UTF-8 text file BOM issue.
+// Remember to set text codepage to "utf-8" on NQuire(via web config) 
+// in order for NQuire to display these Unicode characters.
+#45612348973 Apple [;-)]
+E5123827	<ESC>.0电脑报<03>
+F6920263969798 <ESC>$<ESC>.2欧元€<03><ESC>B1<ESC>.4【查价机】<03><ESC>B0<ESC>.6新大陆<03>
+* <ESC>.4无此商品<03>
