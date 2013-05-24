@@ -16,8 +16,11 @@
 #include "fd_select.h"
 #include "winfuncs.h"
 
-#include "bpmap.h"
+//#include "bpmap.h"
 #include "SendAnswer.h"
+
+#define OUTFILE "NQuire_DISPLAY.txt"
+#define INFILE "NQuire_QR.txt"
 
 int g_nodata_timeout_sec = 0; // default: timeout infinitely
 int g_cur_connections = 0;
@@ -27,8 +30,6 @@ int g_isRecvToStderr = NO;
 enum { idxTcpListen=0, idxUdpRead=1 };
 
 enum { UDP_MAX_RECV_LEN = 2040 };
-
-static CProductList *s_pl;
 
 void 
 SplitUdpTcpPort(const char *str, Ushort &udpport, Ushort &tcpport)
@@ -193,53 +194,6 @@ ReplaceHexPincer(CString &s)
 	return s;
 }
 
-void 
-ProcessRecvContent(CString &s, ISendAnswer *pSA)
-{
-	// Find all \n separated barcodes in s, and process them
-	for(;!s.IsEmpty();)
-	{
-		int curlen = s.GetLength();
-		int LFpos = s.Find('\n'); // the input barcode by NQuire is terminated by \n (LF)
-		if(LFpos==-1)
-			return;
-
-		CString sPart1 = s.Left(LFpos);
-		sPart1.TrimRight('\r');
-		CString sPart2 = s.Right(curlen-LFpos-1);
-		
-		if(sPart1.IsEmpty())
-		{
-			s = sPart2;
-			continue;
-		}
-
-		// take sPart1 as a barcode
-		CString sProductText = s_pl->GetProductByBarcode(sPart1);
-			// The string in sToCliFmt is considered a C language string, i.e.
-			// you can use \n for LF, \t for TAB, \xB5\xE7 for two binary bytes B5 E7.
-		if(sProductText.IsEmpty())
-			sProductText = "<ESC>.<34>(No such product!)<03>";
-
-		ReplaceSubstring(sProductText, "<ESC>", "\x1B");
-		ReplaceHexPincer(sProductText); // replace "<80>" to "\x80" etc
-
-		CString sTcpWrite;
-		sTcpWrite.Format("\x1b$%s\n%s\x03", (LPCSTR)sPart1, (LPCSTR)sProductText);
-			// \x1B$  NQuire clear screen
-			// Note: without trailing \x03, pure sProductText(like "Pear") will not be 
-			// displayed by NQuire(app ver 1.4)
-			// More trailing \x03 will not cause harm.
-
-		const char *pWrite = sTcpWrite;
-		int wrlen = sTcpWrite.GetLength();
-
-		// send product string to client:
-		pSA->SendAnswer(pWrite, wrlen);
-
-		s = sPart2;
-	}
-}
 
 int 
 _EchoServer(void *pParam)
@@ -258,19 +212,67 @@ _EchoServer(void *pParam)
 
 	TcpSendAnswer tcpSA(sock);
 
+	int isendtimeout = GetTickCount();
+
 	for(;;)
 	{
-		int nRd = select_for_read(sock, 
-			g_nodata_timeout_sec ? g_nodata_timeout_sec*1000 : -1);
+		int nRd = select_for_read(sock, 1000);
 			// Use no timeout value(wait infinitely) if g_nodata_timeout_sec==0.
-		if(nRd==0)
+
+		if (GetTickCount() - isendtimeout > 10000)
 		{
-			g_cur_connections--;
-			printf("[%d]{%s} %s no-data timeout: %d seconds. Close it.\n", 
-				g_cur_connections, GetTimeStr(timebuf, sizeof(timebuf)),
-				GetPeerNameStr(sock, tbuf), g_nodata_timeout_sec);
-			break;
+			long lSize;
+			char * buffer;
+			size_t result;
+
+			isendtimeout = GetTickCount();
+			FILE *fp = fopen(OUTFILE, "rb");
+			if(!fp)
+			{
+				printf("Error Load files.\n");
+				return 1;
+			}
+
+			// obtain file size:
+			fseek (fp , 0 , SEEK_END);
+			lSize = ftell (fp);
+			rewind (fp);
+
+			// allocate memory to contain the whole file:
+			buffer = (char*) malloc (sizeof(char)*lSize);
+			if (buffer == NULL) 
+			{
+				printf ("Memory error\n"); 
+				return 2;
+			}
+
+			// copy the file into the buffer:
+			result = fread (buffer, 1, lSize, fp);
+			if (result != lSize) 
+			{
+				printf ("Reading error\n"); 
+				return 3;
+			}
+
+			fclose (fp);
+
+			int re = send(sock, (const char *)buffer, result, 0);   
+			if(re==SOCKET_ERROR)
+			{
+				printf("Error send data.\n");
+				return 4;
+			}
+			else
+			{
+				printf("Sent data.\n");
+				continue;
+			}
+
+			free (buffer);
 		}
+
+		if(nRd==0)
+			continue;
 
 		nRd = recv(sock, rbuf, sizeof(rbuf)-1, 0);
 			// -1: Leave one byte for adding null-terminator 
@@ -287,13 +289,22 @@ _EchoServer(void *pParam)
 
 		pEsp->recv_bytes += nRd;
 
+		FILE *fp = fopen(INFILE, "wb+");
+		if(!fp)
+		{
+			printf("Error Load files.\n");
+			return 1;
+		}
+
+		fwrite(rbuf, 1, nRd, fp);
+		fclose (fp);
+
 		if(g_isRecvToStderr)
 		{
 			fwrite(rbuf, 1, nRd, stderr);
 		}
 
 		sAccumBuf += rbuf;
-		ProcessRecvContent(sAccumBuf, &tcpSA);
 
 	}// for(;;)
 	
@@ -348,11 +359,11 @@ sockserv(SOCKET tcp_listen_sock, Ushort tcp_listen_port,
 	re = bind(udp_listen_sock, (sockaddr*)&udp_addr_listen, sizeof(udp_addr_listen));
 	if(re!=0)
 	{
-		printf("UDP bind() to port %d fail!\n", udp_listen_port);
+//		printf("UDP bind() to port %d fail!\n", udp_listen_port);
 		return;
 	}
 
-	printf("Start listening on UDP port %d.\n", udp_listen_port);
+//	printf("Start listening on UDP port %d.\n", udp_listen_port);
 	printf("Start listening on TCP port %d.\n", tcp_listen_port);
 
 	for(;;)
@@ -456,7 +467,6 @@ sockserv(SOCKET tcp_listen_sock, Ushort tcp_listen_port,
 				// Yes, NQuire app 1.4 expects the same receiving UDP port on both sides,
 				// so we will send data to `udp_listen_port' .
 			UdpSendAnswer udpSA(udp_listen_sock, addr_client);
-			ProcessRecvContent(sBarcode, &udpSA);
 		}
 	}
 END:
@@ -481,70 +491,21 @@ sockserv_out(Ushort tcp_listen_port, Ushort udp_listen_port)
 int 
 main(int argc, char *argv[])
 {
-	printf("***** Demo server program for Newland NQuire 200 (v1.3.0) *****\n");
+	printf("Server for morner.no\n");
 	printf("Program compile date: %s %s\n", __DATE__, __TIME__);
 
-	if(argc<2)
-	{
-		printf("Usage: NQuireSvrDemo <UDPport,TCPport> [no-data-timeout(second)] [recv-to-stderr]\n");
-		printf("    <UDPport,TCPport>: \n");
-		printf("         UDP and TCP listen port of this server.\n");
-		printf("         If only one number given, it is for both UDP and TCP port.\n");
-		printf("    [no-data-timeout]:\n");
-		printf("         Drop client if no data received from that client after the timeout.\n");
-		printf("         If 0, the server will not actively drop(disconnect) the client.\n");
-		printf("    [recv-to-stderr]: If this param exists, dump received bytes to stderr.\n");
-		printf("\n");
-		printf("Example:\n");
-		printf("  NQuireSvrDemo 9000,9101\n");
-		printf("  NQuireSvrDemo 9000,9101 10 log\n");
-		return 1;
-	}
+	Ushort tcpport;
 
-	Ushort tcpport, udpport;
-	SplitUdpTcpPort(argv[1], udpport, tcpport);
+	if(argc<2)
+		tcpport = 9101;
+	else
+		tcpport = atoi(argv[1]);
+
 	if(tcpport==0 || tcpport>0xFFff)
 	{
 		printf("TCP port number %d is invalid.\n", tcpport);
 		return 1;
 	}
-	if(udpport==0 || udpport>0xFFff)
-	{
-		printf("UDP port number %d is invalid.\n", udpport);
-		return 1;
-	}
-
-	if(argc>=3)
-	{
-		g_nodata_timeout_sec = atoi(argv[2]);
-		if(g_nodata_timeout_sec<0)
-		{
-			printf("no-data-timeout invalid: %d.", g_nodata_timeout_sec);
-			return 1;
-		}
-	}
-
-	if(argc>=4)
-	{
-		g_isRecvToStderr = 1;
-	}
-
-	CProductList pl;
-	LoadfileRet_et lerr = pl.LoadMapfile("bpmap.txt");
-	if(lerr==E_Success)
-	{
-		printf("bpmap.txt loaded, %d items in product list.\n", pl.Items());
-	}
-	else
-	{
-		if(lerr==E_FileOpenFail)
-			printf("Cannot open product list file %s\n", DEF_BPMAP_FILE);
-		else
-			printf("Error LoadMapfile.\n");
-		return 1;
-	}
-	s_pl = &pl;
-
 
 	int re;
 	WSADATA wsa_data;
@@ -555,21 +516,9 @@ main(int argc, char *argv[])
 		return 1;
 	}
 
-	printf("Configuration:\n"); 
-	
-	if(g_nodata_timeout_sec)
-		printf("  no-data timeout: %d seconds.\n", g_nodata_timeout_sec);
-	else
-		printf("  TCP clients will be kept until explicitly requested.\n", g_nodata_timeout_sec);
-
-	if(g_isRecvToStderr)
-		printf("  received barcode data will be dumped to stderr.\n", g_nodata_timeout_sec);
-	else
-		printf("  received barcode data will not be displayed locally.\n");
-
 	printf("(Press ESC to quit.)\n");
 
-	sockserv_out(tcpport, udpport);
+	sockserv_out(tcpport, 1949);
 
 	return 0;
 }
