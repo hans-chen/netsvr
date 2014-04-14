@@ -97,7 +97,7 @@ struct SEsParam
 };
 
 void 
-ReplaceSubstring(CString &s, const char *pszOld, const char *pszNew)
+ReplaceSubstring(CString &s, LPCTSTR pszOld, LPCTSTR pszNew)
 {
 	// Replace occurrence of pszNew in s.
 	// I do not use CString.Replace() to do the substitution, because it work in
@@ -109,17 +109,18 @@ ReplaceSubstring(CString &s, const char *pszOld, const char *pszNew)
 	//
 	// will fail to get "<03>" replaced.
 
-	int nlen = strlen(pszOld);
+	int nlen = wcslen(pszOld);
 	for(;;)
 	{
-		const char *head = s;
-		const char *pLoc = strstr(head, pszOld);
+		LPCTSTR head = s;
+		LPCTSTR pLoc = wcsstr(head, pszOld);
+
 		if(!pLoc)
 			return;
 		
 		s = s.Left(pLoc-head) 
 			+ pszNew
-			+ s.Right((const char*)s+s.GetLength() - pLoc - nlen);
+			+ s.Right((LPCTSTR)s + s.GetLength() - pLoc - nlen);
 	}
 }
 
@@ -135,7 +136,7 @@ hexchar2val(char hexchar)
 }
 
 int 
-CheckHexPincer(const char *p)
+CheckHexPincer(LPCTSTR p)
 {
 	if(! (p[0]=='<' && p[3]=='>'))
 		return -1;
@@ -165,9 +166,9 @@ ReplaceHexPincer(CString &s)
 	CString t;
 	const int ex_3 = 3;
 	int origlen = s.GetLength();
-	char *ps = s.GetBuffer(origlen);
-	char *pt = t.GetBuffer(origlen+ex_3);
-	memcpy(pt, (const char*)s, origlen); 
+	LPTSTR ps = s.GetBuffer(origlen);
+	LPTSTR pt = t.GetBuffer(origlen + ex_3);
+	memcpy(pt, (LPCTSTR)s, origlen);
 	memset(pt+origlen, 0, ex_3+1); // make a copy of s into t
 
 	// Now will copy t back to s with "<80>" etc converted to "\x80"
@@ -221,17 +222,17 @@ ProcessRecvContent(CString &s, ISendAnswer *pSA)
 		if(sProductText.IsEmpty())
 			sProductText = "<ESC>.<34>(No such product!)<03>";
 
-		ReplaceSubstring(sProductText, "<ESC>", "\x1B");
+		ReplaceSubstring(sProductText, _T("<ESC>"), _T("\x1B"));
 		ReplaceHexPincer(sProductText); // replace "<80>" to "\x80" etc
 
 		CString sTcpWrite;
-		sTcpWrite.Format("\x1b$%s\n%s\x03", (LPCSTR)sPart1, (LPCSTR)sProductText);
+		sTcpWrite.Format(_T("\x1b$%s\n%s\x03"), sPart1, sProductText);
 			// \x1B$  NQuire clear screen
 			// Note: without trailing \x03, pure sProductText(like "Pear") will not be 
 			// displayed by NQuire(app ver 1.4)
 			// More trailing \x03 will not cause harm.
 
-		const char *pWrite = sTcpWrite;
+		LPCTSTR pWrite = sTcpWrite;
 		int wrlen = sTcpWrite.GetLength();
 
 		// send product string to client:
@@ -530,7 +531,7 @@ main(int argc, char *argv[])
 	}
 
 	CProductList pl;
-	LoadfileRet_et lerr = pl.LoadMapfile("bpmap.txt");
+	LoadfileRet_et lerr = pl.LoadMapfile(_T("bpmap.txt"));
 	if(lerr==E_Success)
 	{
 		printf("bpmap.txt loaded, %d items in product list.\n", pl.Items());

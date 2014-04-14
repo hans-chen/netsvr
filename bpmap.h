@@ -5,7 +5,7 @@
 
 // bpmap: barcode to product map
 
-#define DEF_BPMAP_FILE "bpmap.txt"
+#define DEF_BPMAP_FILE _T("bpmap.txt")
 
 struct SbpItem
 {
@@ -29,14 +29,14 @@ public:
 	CProductList();
 	~CProductList();
 
-	LoadfileRet_et LoadMapfile(const char *szfn);
-	const char *GetProductByBarcode(const char *barcode);
+	LoadfileRet_et LoadMapfile(LPCTSTR szfn);
+	LPCTSTR GetProductByBarcode(LPCTSTR barcode);
 		// return NULL if no match
 	
 	int Items(){ return m_items; }
 
 private:
-	LoadfileRet_et inLoadMapfile(const char *szfn);
+	LoadfileRet_et inLoadMapfile(LPCTSTR szfn);
 
 	static int _thread_auto_load_bpmap(void *param);
 	int thread_auto_load_bpmap();

@@ -1,3 +1,4 @@
+#define _USE_32BIT_TIME_T
 #include <sys/types.h>
 #include <sys/stat.h>
 
@@ -6,9 +7,9 @@
 
 #define BUFSIZE 4000
 
-static char s_szNullProductText[BUFSIZE];
+static TCHAR s_szNullProductText[BUFSIZE];
 	// When an input barcode is not found in the mapping file, use this text.
-static const char *s_pszNullProductText = s_szNullProductText;
+static LPCTSTR s_pszNullProductText = s_szNullProductText;
 
 CProductList::CProductList() :
 	mar_items(NULL), m_items(0), 
@@ -36,7 +37,7 @@ CProductList::~CProductList()
 }
 
 LoadfileRet_et
-CProductList::inLoadMapfile(const char *szfn)
+CProductList::inLoadMapfile(LPCTSTR szfn)
 {
 	SAutoMutex am(m_hMutex);
 
@@ -45,14 +46,14 @@ CProductList::inLoadMapfile(const char *szfn)
 
 	m_items = 0;
 
-	struct _stat filest;
-	int err = _stat(szfn, &filest);
+	struct _stat32 filest;
+	int err = _wstat(szfn, &filest);
 	if(!err)
 	{
 		m_tModified = filest.st_mtime;
 	}
 
-	FILE *fp = fopen(szfn, "rb");
+	FILE *fp = _wfopen(szfn, _T("rb"));
 	if(!fp)
 		return E_FileOpenFail;
 
@@ -65,7 +66,7 @@ CProductList::inLoadMapfile(const char *szfn)
 		// special >>>
 		if(strcmp(s, "*")==0)
 		{
-			fgets(s_szNullProductText, sizeof(s_szNullProductText), fp);
+			fgetws(s_szNullProductText, sizeof(s_szNullProductText), fp);
 			s_pszNullProductText = s_szNullProductText;
 			while(*s_pszNullProductText==' ' || *s_pszNullProductText=='\t') 
 				s_pszNullProductText++; // trim leading space and tabs
@@ -79,7 +80,7 @@ CProductList::inLoadMapfile(const char *szfn)
 
 		mar_items[m_items].sProduct = s;
 		mar_items[m_items].sProduct.TrimLeft();
-		mar_items[m_items].sProduct.TrimRight("\r\n");
+		mar_items[m_items].sProduct.TrimRight(_T("\r\n"));
 
 		m_items++;
 	}
@@ -97,14 +98,14 @@ int CProductList::thread_auto_load_bpmap()
 {
 	LoadfileRet_et lferr = E_Unknown;
 	int err = 0;
-	struct _stat filest;
+	struct _stat32 filest;
 	for(;;)
 	{
 		BOOL b = WaitForSingleObject(m_hQuitEvent, 1000);
 		if(b==WAIT_OBJECT_0)
 			break;
 
-		err = _stat(DEF_BPMAP_FILE, &filest);
+		err = _wstat(DEF_BPMAP_FILE, &filest);
 		if(err)
 		{
 			// maybe the file has been deleted.
@@ -134,7 +135,7 @@ int CProductList::thread_auto_load_bpmap()
 
 
 LoadfileRet_et
-CProductList::LoadMapfile(const char *szfn)
+CProductList::LoadMapfile(LPCTSTR szfn)
 {
 	LoadfileRet_et lferr = inLoadMapfile(szfn);
 	if(lferr)
@@ -151,8 +152,8 @@ CProductList::LoadMapfile(const char *szfn)
 	return E_Success;
 }
 
-const char *
-CProductList::GetProductByBarcode(const char *barcode)
+LPCTSTR 
+CProductList::GetProductByBarcode(LPCTSTR barcode)
 {
 	SAutoMutex am(m_hMutex);
 
